@@ -12,5 +12,5 @@ dist/
 build/
 .DS_Store
 .git_backup/
-media/uploads/
+media/
 *.log
