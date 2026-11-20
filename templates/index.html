@@ -36,6 +36,7 @@
   </style>
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-900 custom-scrollbar">
+{% verbatim %}
   <div id="root"></div>
 
   <!-- Main React App Script -->
@@ -963,7 +964,7 @@
                               </td>
                               <td class="py-4 px-6 text-center">
                                 <a
-                                  href={`/api/orders/${order.id}/invoice/?format=html`}
+                                  href={`/api/orders/${order.id}/invoice/?view=html`}
                                   target="_blank"
                                   class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
                                 >
@@ -1110,7 +1111,7 @@
                               <td class="py-3 px-4">₹{o.gst_amount_rupees.toFixed(2)}</td>
                               <td class="py-3 px-4 text-right font-black text-slate-900">₹{o.net_amount_rupees.toFixed(2)}</td>
                               <td class="py-3 px-4 text-center">
-                                <a href={`/api/orders/${o.id}/invoice/?format=html`} target="_blank" class="text-xs text-blue-600 font-bold hover:underline">
+                                <a href={`/api/orders/${o.id}/invoice/?view=html`} target="_blank" class="text-xs text-blue-600 font-bold hover:underline">
                                   View
                                 </a>
                               </td>
@@ -1688,5 +1689,6 @@
     const root = ReactDOM.createRoot(document.getElementById('root'));
     root.render(<App />);
   </script>
+{% endverbatim %}
 </body>
 </html>

@@ -24,7 +24,6 @@ urlpatterns = [
     path('orders/create/', views.order_create_view, name='order_create'),
     path('orders/verify/', views.order_verify_view, name='order_verify'),
     path('orders/<int:order_id>/simulate-test-payment/', views.simulate_test_payment_view, name='order_simulate_payment'),
-    path('orders/<int:order_id>/invoice/', views.order_invoice_view, name='order_invoice'),
     path('payments/webhook/', views.razorpay_webhook_view, name='razorpay_webhook'),
 
     # Library & Secure Materials

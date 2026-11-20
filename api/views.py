@@ -1,6 +1,7 @@
 import json
 import logging
 import hashlib
+import hmac
 from datetime import timedelta, datetime
 from django.utils import timezone
 from django.db import transaction
@@ -672,33 +673,7 @@ def material_content_view(request, material_id):
 # 7. ORDER HISTORY & GST INVOICE VIEWS
 # ============================================================================
 
-class OrderViewSet(viewsets.ReadOnlyModelViewSet):
-    """S8: Order history"""
-    serializer_class = OrderSerializer
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get_queryset(self):
-        user = self.request.user
-        if user.is_admin_user() and self.request.GET.get('all_orders') == 'true':
-            return Order.objects.all().select_related('user', 'coupon').prefetch_related('items__product').order_by('-created_at')
-        return Order.objects.filter(user=user).select_related('user', 'coupon').prefetch_related('items__product').order_by('-created_at')
-
-
-@api_view(['GET'])
-@permission_classes([permissions.IsAuthenticated])
-def order_invoice_view(request, order_id):
-    """
-    S8: Order history with a downloadable / printable HTML invoice.
-    Shows prices inclusive of 18% GST and shows the GST split (Base, CGST 9%, SGST 9%, Total).
-    """
-    try:
-        if request.user.is_admin_user():
-            order = Order.objects.get(id=order_id)
-        else:
-            order = Order.objects.get(id=order_id, user=request.user)
-    except Order.DoesNotExist:
-        return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
-
+def generate_invoice_response(order, format_param=None):
     gst_split = PricingEngine.calculate_gst_breakdown(order.net_amount_paise)
 
     invoice_data = {
@@ -736,7 +711,7 @@ def order_invoice_view(request, order_id):
     }
 
     # If client requests HTML view directly for printing:
-    if request.GET.get('format') == 'html':
+    if format_param == 'html':
         html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -861,6 +836,42 @@ th {{ background-color: #f8fafc; font-weight: 600; }}
         return HttpResponse(html, content_type='text/html')
 
     return Response(invoice_data)
+
+
+class OrderViewSet(viewsets.ReadOnlyModelViewSet):
+    """S8: Order history"""
+    serializer_class = OrderSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_admin_user() and self.request.GET.get('all_orders') == 'true':
+            return Order.objects.all().select_related('user', 'coupon').prefetch_related('items__product').order_by('-created_at')
+        return Order.objects.filter(user=user).select_related('user', 'coupon').prefetch_related('items__product').order_by('-created_at')
+
+    @action(detail=True, methods=['get'])
+    def invoice(self, request, pk=None):
+        order = self.get_object()
+        view_type = request.GET.get('view') or request.GET.get('render') or request.GET.get('type')
+        return generate_invoice_response(order, view_type)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def order_invoice_view(request, order_id):
+    """
+    S8: Order history with a downloadable / printable HTML invoice.
+    Shows prices inclusive of 18% GST and shows the GST split (Base, CGST 9%, SGST 9%, Total).
+    """
+    try:
+        if request.user.is_admin_user():
+            order = Order.objects.get(id=order_id)
+        else:
+            order = Order.objects.get(id=order_id, user=request.user)
+    except Order.DoesNotExist:
+        return Response({"error": "Order not found."}, status=status.HTTP_404_NOT_FOUND)
+
+    return generate_invoice_response(order, request.GET.get('format'))
 
 
 # ============================================================================

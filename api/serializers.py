@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils import timezone
+from django.db.models import Q
 from .models import (
     User, Board, ClassLevel, Subject, Chapter, StudyMaterial,
     Product, Coupon, Order, OrderItem, Payment, Entitlement, ManualAccessLog
@@ -91,10 +92,8 @@ class ChapterSerializer(serializers.ModelSerializer):
         # Parent class pass
         has_pass = Entitlement.objects.filter(
             user=user, is_active=True, entitlement_type='CLASS_PASS', class_level_id=obj.subject.class_level_id
-        ).filter(expires_at__isnull=True) | Entitlement.objects.filter(
-            user=user, is_active=True, entitlement_type='CLASS_PASS', class_level_id=obj.subject.class_level_id, expires_at__gt=now
-        )
-        return has_pass.exists()
+        ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+        return has_pass
 
 
 class SubjectSerializer(serializers.ModelSerializer):
@@ -119,10 +118,8 @@ class SubjectSerializer(serializers.ModelSerializer):
         now = timezone.now()
         has_pass = Entitlement.objects.filter(
             user=user, is_active=True, entitlement_type='CLASS_PASS', class_level_id=obj.class_level_id
-        ).filter(expires_at__isnull=True) | Entitlement.objects.filter(
-            user=user, is_active=True, entitlement_type='CLASS_PASS', class_level_id=obj.class_level_id, expires_at__gt=now
-        )
-        return has_pass.exists()
+        ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+        return has_pass
 
 
 class ClassLevelSerializer(serializers.ModelSerializer):
@@ -212,33 +209,24 @@ class ProductSerializer(serializers.ModelSerializer):
         if obj.product_type == 'CHAPTER' and obj.target_chapter:
             if obj.target_chapter.is_free:
                 return True
-            return Entitlement.objects.filter(
-                user=user, is_active=True
-            ).filter(
-                chapter=obj.target_chapter
-            ).exists() or Entitlement.objects.filter(
-                user=user, is_active=True, entitlement_type='SUBJECT', subject=obj.target_chapter.subject
-            ).exists() or Entitlement.objects.filter(
+            has_ch = Entitlement.objects.filter(user=user, is_active=True, chapter=obj.target_chapter).exists()
+            has_sub = Entitlement.objects.filter(user=user, is_active=True, entitlement_type='SUBJECT', subject=obj.target_chapter.subject).exists()
+            has_pass = Entitlement.objects.filter(
                 user=user, is_active=True, entitlement_type='CLASS_PASS', class_level=obj.target_chapter.subject.class_level
-            ).filter(expires_at__isnull=True) | Entitlement.objects.filter(
-                user=user, is_active=True, entitlement_type='CLASS_PASS', class_level=obj.target_chapter.subject.class_level, expires_at__gt=now
-            ).exists()
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+            return has_ch or has_sub or has_pass
 
         elif obj.product_type == 'SUBJECT' and obj.target_subject:
-            return Entitlement.objects.filter(
-                user=user, is_active=True, entitlement_type='SUBJECT', subject=obj.target_subject
-            ).exists() or Entitlement.objects.filter(
+            has_sub = Entitlement.objects.filter(user=user, is_active=True, entitlement_type='SUBJECT', subject=obj.target_subject).exists()
+            has_pass = Entitlement.objects.filter(
                 user=user, is_active=True, entitlement_type='CLASS_PASS', class_level=obj.target_subject.class_level
-            ).filter(expires_at__isnull=True) | Entitlement.objects.filter(
-                user=user, is_active=True, entitlement_type='CLASS_PASS', class_level=obj.target_subject.class_level, expires_at__gt=now
-            ).exists()
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
+            return has_sub or has_pass
 
         elif obj.product_type in ['MONTHLY_PASS', 'ANNUAL_PASS'] and obj.target_class:
             return Entitlement.objects.filter(
                 user=user, is_active=True, entitlement_type='CLASS_PASS', class_level=obj.target_class
-            ).filter(expires_at__isnull=True) | Entitlement.objects.filter(
-                user=user, is_active=True, entitlement_type='CLASS_PASS', class_level=obj.target_class, expires_at__gt=now
-            ).exists()
+            ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now)).exists()
 
         return False
 
