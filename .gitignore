@@ -11,5 +11,6 @@ node_modules/
 dist/
 build/
 .DS_Store
+.git_backup/
 media/uploads/
 *.log
