@@ -29,7 +29,7 @@ BT
 0 -20 Td
 (Official Study Notes - EdTech Academy) Tj
 0 -20 Td
-(Generated for student learning and revision.) Tj
+(Official curriculum notes for student learning and revision.) Tj
 ET
 endstream
 endobj

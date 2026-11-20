@@ -8,8 +8,8 @@ MAX_REQUESTS_PER_MINUTE = 60
 
 class CorsAndSecurityMiddleware:
     """
-    Handles CORS for frontend dev servers (e.g. Vite on 5173, React on 3000, Django on 8000)
-    and enforces rate limiting on login/payment endpoints as required by assessment specs.
+    Handles CORS for frontend dev servers
+    and enforces rate limiting on login/payment endpoints for security.
     """
     def __init__(self, get_response):
         self.get_response = get_response

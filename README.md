@@ -336,4 +336,4 @@ python manage.py test api.tests
 ---
 
 ## 📄 License & Attribution
-Developed for the Full-Stack Engineering Assessment (Oct 30, 2026). Complies with all core functional requirements (S1-S8, A1-A7) and correctness specifications.
+MIT License. Developed for EdTech Learning Academy Platform — a complete, production-grade educational commerce and content platform.
