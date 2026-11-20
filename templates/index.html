@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EdTech Learning Academy - Interactive Learning & Notes</title>
+  
+  <!-- Tailwind CSS & Lucide Icons -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- React 18 & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Razorpay Checkout SDK -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #f8fafc;
+      color: #0f172a;
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .glass-card {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(226, 232, 240, 0.8);
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900 custom-scrollbar">
+  <div id="root"></div>
+
+  <!-- Main React App Script -->
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    const API_BASE = '/api';
+
+    // Helper for authenticated fetch
+    const apiFetch = async (endpoint, options = {}) => {
+      const token = localStorage.getItem('edtech_token');
+      const headers = {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...(options.headers || {})
+      };
+      const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || data.detail || JSON.stringify(data) || 'Request failed');
+      }
+      return data;
+    };
+
+    function App() {
+      // User & Auth State
+      const [user, setUser] = useState(null);
+      const [token, setToken] = useState(localStorage.getItem('edtech_token') || '');
+      const [authModalOpen, setAuthModalOpen] = useState(false);
+      const [authMode, setAuthMode] = useState('login'); // 'login', 'register', 'otp'
+      const [authForm, setAuthForm] = useState({ username: '', email: '', password: '', phone_number: '', otp_code: '' });
+      const [authError, setAuthError] = useState('');
+
+      // Navigation & Views
+      const [currentView, setCurrentView] = useState('catalogue'); // 'catalogue', 'library', 'orders', 'admin'
+      const [searchQuery, setSearchQuery] = useState('');
+
+      // Catalogue & Products State
+      const [boards, setBoards] = useState([]);
+      const [selectedBoard, setSelectedBoard] = useState(null);
+      const [selectedClass, setSelectedClass] = useState(null);
+      const [selectedSubject, setSelectedSubject] = useState(null);
+      const [products, setProducts] = useState([]);
+      const [loadingCatalogue, setLoadingCatalogue] = useState(true);
+
+      // Cart & Checkout State
+      const [cart, setCart] = useState([]);
+      const [cartDrawerOpen, setCartDrawerOpen] = useState(false);
+      const [couponCode, setCouponCode] = useState('');
+      const [cartCalculation, setCartCalculation] = useState(null);
+      const [cartLoading, setCartLoading] = useState(false);
+
+      // Study Reader Modal State
+      const [readerModal, setReaderModal] = useState({ open: false, material: null, loading: false, error: null });
+
+      // Razorpay Payment Simulation Modal State
+      const [paymentModal, setPaymentModal] = useState({ open: false, order: null, rzpOrder: null });
+
+      // Library & Orders State
+      const [libraryData, setLibraryData] = useState({ chapters: [], subjects: [], class_passes: [], free_sample_chapters: [] });
+      const [orders, setOrders] = useState([]);
+
+      // Admin State
+      const [adminTab, setAdminTab] = useState('dashboard'); // 'dashboard', 'catalogue', 'products', 'coupons', 'orders', 'access'
+      const [adminDashboard, setAdminDashboard] = useState(null);
+      const [adminOrders, setAdminOrders] = useState([]);
+      const [adminCoupons, setAdminCoupons] = useState([]);
+      const [adminLogs, setAdminLogs] = useState([]);
+      const [manualAccessForm, setManualAccessForm] = useState({ student_id: '', action: 'GRANT', entitlement_type: 'CHAPTER', target_id: '', duration_days: '30', reason: '' });
+
+      // Notifications / Alerts
+      const [toast, setToast] = useState(null);
+      const showToast = (message, type = 'success') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 4000);
+      };
+
+      // Load initial current user
+      useEffect(() => {
+        if (token) {
+          apiFetch('/auth/me/')
+            .then(u => setUser(u))
+            .catch(() => {
+              setToken('');
+              localStorage.removeItem('edtech_token');
+              setUser(null);
+            });
+        }
+      }, [token]);
+
+      // Load Catalogue & Products
+      const loadCatalogue = async () => {
+        setLoadingCatalogue(true);
+        try {
+          const [hierarchyData, productsData] = await Promise.all([
+            apiFetch('/catalogue/hierarchy/'),
+            apiFetch('/products/')
+          ]);
+          setBoards(hierarchyData);
+          setProducts(productsData);
+          if (hierarchyData.length > 0) {
+            const defaultBoard = hierarchyData[0];
+            setSelectedBoard(defaultBoard);
+            if (defaultBoard.classes && defaultBoard.classes.length > 0) {
+              const defaultClass = defaultBoard.classes[0];
+              setSelectedClass(defaultClass);
+              if (defaultClass.subjects && defaultClass.subjects.length > 0) {
+                setSelectedSubject(defaultClass.subjects[0]);
+              }
+            }
+          }
+        } catch (err) {
+          console.error("Failed to load catalogue:", err);
+        } finally {
+          setLoadingCatalogue(false);
+        }
+      };
+
+      useEffect(() => {
+        loadCatalogue();
+      }, [user]);
+
+      // Re-calculate cart when items or coupon change
+      useEffect(() => {
+        if (cart.length === 0) {
+          setCartCalculation(null);
+          return;
+        }
+        if (!user) return;
+
+        setCartLoading(true);
+        apiFetch('/cart/calculate/', {
+          method: 'POST',
+          body: JSON.stringify({
+            product_ids: cart.map(p => p.id),
+            coupon_code: couponCode
+          })
+        })
+        .then(res => setCartCalculation(res))
+        .catch(err => {
+          showToast(err.message, 'error');
+          // If coupon was invalid, clear coupon
+          if (couponCode) setCouponCode('');
+        })
+        .finally(() => setCartLoading(false));
+      }, [cart, couponCode, user]);
+
+      // Load Library Data
+      const loadLibrary = async () => {
+        if (!user) return;
+        try {
+          const data = await apiFetch('/library/');
+          setLibraryData(data);
+        } catch (err) {
+          console.error("Failed to load library:", err);
+        }
+      };
+
+      // Load Orders Data
+      const loadOrders = async () => {
+        if (!user) return;
+        try {
+          const data = await apiFetch('/orders/');
+          setOrders(data);
+        } catch (err) {
+          console.error("Failed to load orders:", err);
+        }
+      };
+
+      // Load Admin Data
+      const loadAdminData = async () => {
+        if (!user || !user.is_admin) return;
+        try {
+          if (adminTab === 'dashboard') {
+            const dash = await apiFetch('/admin/dashboard/');
+            setAdminDashboard(dash);
+          } else if (adminTab === 'orders') {
+            const ords = await apiFetch('/admin/orders/');
+            setAdminOrders(ords);
+          } else if (adminTab === 'coupons') {
+            const coups = await apiFetch('/admin/coupons/');
+            setAdminCoupons(coups);
+          } else if (adminTab === 'access') {
+            const logs = await apiFetch('/admin/access/logs/');
+            setAdminLogs(logs);
+          }
+        } catch (err) {
+          console.error("Admin data error:", err);
+        }
+      };
+
+      useEffect(() => {
+        if (currentView === 'library') loadLibrary();
+        if (currentView === 'orders') loadOrders();
+        if (currentView === 'admin') loadAdminData();
+      }, [currentView, adminTab, user]);
+
+      // Re-initialize Lucide icons on render
+      useEffect(() => {
+        if (window.lucide) {
+          window.lucide.createIcons();
+        }
+      });
+
+      // Quick Demo Switcher helper
+      const loginDemoAccount = async (role) => {
+        const username = role === 'admin' ? 'admin' : 'student';
+        const password = role === 'admin' ? 'Admin@123' : 'Student@123';
+        try {
+          const res = await apiFetch('/auth/login/', {
+            method: 'POST',
+            body: JSON.stringify({ username_or_email: username, password })
+          });
+          localStorage.setItem('edtech_token', res.token);
+          setToken(res.token);
+          setUser(res.user);
+          showToast(`Logged in as ${role === 'admin' ? 'Admin (System)' : 'Student (Rahul)'}`);
+          setAuthModalOpen(false);
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      };
+
+      // Cart Actions
+      const addToCart = (product) => {
+        if (!user) {
+          setAuthModalOpen(true);
+          return;
+        }
+        if (cart.find(item => item.id === product.id)) {
+          showToast("Item is already in your cart.", "info");
+          setCartDrawerOpen(true);
+          return;
+        }
+        setCart([...cart, product]);
+        showToast(`Added ${product.title} to cart`);
+        setCartDrawerOpen(true);
+      };
+
+      const removeFromCart = (productId) => {
+        setCart(cart.filter(item => item.id !== productId));
+      };
+
+      // Study Notes Reader
+      const openReader = async (materialId, chapterTitle) => {
+        if (!user) {
+          setAuthModalOpen(true);
+          return;
+        }
+        setReaderModal({ open: true, material: null, loading: true, error: null, chapterTitle });
+        try {
+          const data = await apiFetch(`/materials/${materialId}/content/`);
+          setReaderModal({ open: true, material: data, loading: false, error: null, chapterTitle });
+        } catch (err) {
+          setReaderModal({
+            open: true,
+            material: null,
+            loading: false,
+            error: err.message || "Access Denied (HTTP 403 Forbidden). Product must be purchased to read locked notes.",
+            chapterTitle
+          });
+        }
+      };
+
+      // Checkout Initiation
+      const handleCheckout = async () => {
+        if (cart.length === 0) return;
+        setCartLoading(true);
+        try {
+          const res = await apiFetch('/orders/create/', {
+            method: 'POST',
+            body: JSON.stringify({
+              product_ids: cart.map(p => p.id),
+              coupon_code: couponCode
+            })
+          });
+
+          // If free order (100% discount or ₹0)
+          if (res.is_free) {
+            showToast("Order completed for ₹0! Access granted.", "success");
+            setCart([]);
+            setCartCalculation(null);
+            setCartDrawerOpen(false);
+            loadCatalogue();
+            setCurrentView('library');
+            return;
+          }
+
+          // Open Payment Modal (Handles both official Razorpay Checkout and Test Mode Simulator)
+          setPaymentModal({
+            open: true,
+            order: res.order,
+            rzpOrder: res
+          });
+          setCartDrawerOpen(false);
+        } catch (err) {
+          showToast(err.message, 'error');
+        } finally {
+          setCartLoading(false);
+        }
+      };
+
+      // Simulate or verify payment
+      const handleSimulatePayment = async (statusType, upiId) => {
+        if (!paymentModal.order) return;
+        try {
+          const res = await apiFetch(`/orders/${paymentModal.order.id}/simulate-test-payment/`, {
+            method: 'POST',
+            body: JSON.stringify({
+              status: statusType,
+              upi_id: upiId
+            })
+          });
+
+          if (statusType === 'FAILURE') {
+            showToast("Payment failed as simulated by failure@razorpay.", "error");
+            setPaymentModal({ ...paymentModal, open: false });
+            return;
+          }
+
+          if (statusType === 'PENDING') {
+            showToast("UPI Collect request is pending. Waiting for student approval...", "info");
+            return;
+          }
+
+          showToast("Payment Verified Successfully! Access granted to your library.", "success");
+          setPaymentModal({ open: false, order: null, rzpOrder: null });
+          setCart([]);
+          setCartCalculation(null);
+          loadCatalogue();
+          setCurrentView('library');
+        } catch (err) {
+          showToast(err.message, 'error');
+        }
+      };
+
+      // Official Razorpay Checkout integration
+      const openOfficialRazorpayCheckout = () => {
+        const { rzpOrder } = paymentModal;
+        if (!window.Razorpay || !rzpOrder) return;
+
+        const options = {
+          key: rzpOrder.razorpay_key_id,
+          amount: rzpOrder.amount_paise,
+          currency: rzpOrder.currency || "INR",
+          name: "EdTech Academy",
+          description: `Order #${rzpOrder.order.order_number}`,
+          order_id: rzpOrder.razorpay_order_id,
+          handler: async function (response) {
+            try {
+              const verifyRes = await apiFetch('/orders/verify/', {
+                method: 'POST',
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  payment_method: 'UPI'
+                })
+              });
+              showToast("Payment verified via Razorpay! Access unlocked.", "success");
+              setPaymentModal({ open: false, order: null, rzpOrder: null });
+              setCart([]);
+              setCartCalculation(null);
+              loadCatalogue();
+              setCurrentView('library');
+            } catch (err) {
+              showToast(err.message, 'error');
+            }
+          },
+          prefill: {
+            name: user ? user.username : "",
+            email: user ? user.email : "",
+            contact: user ? user.phone_number : ""
+          },
+          theme: { color: "#2563eb" }
+        };
+
+        const rzp = new window.Razorpay(options);
+        rzp.on('payment.failed', function (response) {
+          showToast(`Payment Failed: ${response.error.description}`, "error");
+        });
+        rzp.open();
+      };
+
+      // Filtered Chapters for Catalogue view
+      const activeChapters = useMemo(() => {
+        if (!selectedSubject || !selectedSubject.chapters) return [];
+        if (!searchQuery) return selectedSubject.chapters;
+        return selectedSubject.chapters.filter(ch =>
+          ch.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (ch.description && ch.description.toLowerCase().includes(searchQuery.toLowerCase()))
+        );
+      }, [selectedSubject, searchQuery]);
+
+      // Find products related to current scope
+      const subjectProduct = useMemo(() => {
+        if (!selectedSubject) return null;
+        return products.find(p => p.product_type === 'SUBJECT' && p.target_subject === selectedSubject.id);
+      }, [selectedSubject, products]);
+
+      const classPasses = useMemo(() => {
+        if (!selectedClass) return [];
+        return products.filter(p => ['MONTHLY_PASS', 'ANNUAL_PASS'].includes(p.product_type) && p.target_class === selectedClass.id);
+      }, [selectedClass, products]);
+
+      return (
+        <div class="flex flex-col min-h-screen">
+          {/* Top Quick Demo Switcher Bar */}
+          <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white text-xs py-2 px-4 border-b border-indigo-800 flex flex-wrap items-center justify-between gap-2 shadow-inner">
+            <div class="flex items-center gap-2">
+              <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500 text-slate-950">Assessment Demo Mode</span>
+              <span class="text-slate-300 hidden md:inline">Test Razorpay, UPI simulation, Upgrade Credits, and Access Locks</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-slate-400">Quick Login:</span>
+              <button onClick={() => loginDemoAccount('student')} class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 font-semibold transition">
+                Student (Rahul)
+              </button>
+              <button onClick={() => loginDemoAccount('admin')} class="px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 font-semibold transition">
+                Admin (System)
+              </button>
+              {user && (
+                <button onClick={() => { localStorage.removeItem('edtech_token'); setToken(''); setUser(null); showToast("Logged out"); }} class="text-rose-400 hover:text-rose-300 ml-2">
+                  Logout
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Main Navigation Bar */}
+          <header class="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200 shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+              <div class="flex items-center gap-6">
+                <div onClick={() => setCurrentView('catalogue')} class="flex items-center gap-2 cursor-pointer group">
+                  <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white font-bold shadow-md shadow-blue-500/20 group-hover:scale-105 transition">
+                    <i data-lucide="book-open" class="w-5 h-5"></i>
+                  </div>
+                  <div>
+                    <span class="font-extrabold text-lg tracking-tight bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">EdTech</span>
+                    <span class="text-xs block text-slate-500 font-semibold uppercase tracking-wider">Academy</span>
+                  </div>
+                </div>
+
+                <nav class="hidden md:flex items-center space-x-1">
+                  <button onClick={() => setCurrentView('catalogue')} class={`px-3 py-2 rounded-lg text-sm font-semibold transition ${currentView === 'catalogue' ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>
+                    Catalogue
+                  </button>
+                  <button onClick={() => { if (!user) setAuthModalOpen(true); else setCurrentView('library'); }} class={`px-3 py-2 rounded-lg text-sm font-semibold transition ${currentView === 'library' ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>
+                    My Library
+                  </button>
+                  <button onClick={() => { if (!user) setAuthModalOpen(true); else setCurrentView('orders'); }} class={`px-3 py-2 rounded-lg text-sm font-semibold transition ${currentView === 'orders' ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'}`}>
+                    Orders & Invoices
+                  </button>
+                  {user && user.is_admin && (
+                    <button onClick={() => setCurrentView('admin')} class={`px-3 py-2 rounded-lg text-sm font-semibold transition ${currentView === 'admin' ? 'bg-purple-50 text-purple-600 font-bold' : 'text-purple-600 hover:bg-purple-50'}`}>
+                      Admin Portal
+                    </button>
+                  )}
+                </nav>
+              </div>
+
+              {/* Search Bar */}
+              <div class="flex-1 max-w-md hidden lg:block">
+                <div class="relative">
+                  <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                  <input
+                    type="text"
+                    placeholder="Search chapters, topics, formulas..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    class="w-full pl-9 pr-4 py-2 rounded-full border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} class="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600">✕</button>
+                  )}
+                </div>
+              </div>
+
+              {/* Cart & Profile Area */}
+              <div class="flex items-center gap-3">
+                <button
+                  onClick={() => setCartDrawerOpen(true)}
+                  class="relative p-2.5 rounded-full hover:bg-slate-100 text-slate-700 transition"
+                  title="View Cart"
+                >
+                  <i data-lucide="shopping-cart" class="w-5 h-5"></i>
+                  {cart.length > 0 && (
+                    <span class="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center animate-pulse">
+                      {cart.length}
+                    </span>
+                  )}
+                </button>
+
+                {user ? (
+                  <div class="flex items-center gap-2 pl-2 border-l border-slate-200">
+                    <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 text-white font-bold text-xs flex items-center justify-center">
+                      {user.username.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div class="hidden sm:block text-left">
+                      <div class="text-xs font-bold text-slate-900 leading-tight">{user.username}</div>
+                      <div class="text-[10px] font-semibold text-slate-500 uppercase">{user.role}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => { setAuthMode('login'); setAuthModalOpen(true); }}
+                    class="px-4 py-2 rounded-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold shadow-md shadow-blue-500/20 transition"
+                  >
+                    Sign In
+                  </button>
+                )}
+              </div>
+            </div>
+          </header>
+
+          {/* Toast Notification Alert */}
+          {toast && (
+            <div class={`fixed bottom-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl border flex items-center gap-3 text-sm font-medium transition-all transform animate-bounce ${
+              toast.type === 'error' ? 'bg-rose-50 text-rose-800 border-rose-200' :
+              toast.type === 'info' ? 'bg-sky-50 text-sky-800 border-sky-200' :
+              'bg-emerald-50 text-emerald-800 border-emerald-200'
+            }`}>
+              <i data-lucide={toast.type === 'error' ? 'alert-circle' : 'check-circle-2'} class="w-5 h-5"></i>
+              <span>{toast.message}</span>
+            </div>
+          )}
+
+          {/* MAIN VIEW CONTENT */}
+          <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            {currentView === 'catalogue' && (
+              <div>
+                {/* Hero Banner with Class Pass CTA */}
+                <div class="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 text-white p-8 mb-8 shadow-xl">
+                  <div class="relative z-10 max-w-2xl">
+                    <span class="inline-block px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm text-xs font-bold tracking-wide uppercase mb-3">
+                      Comprehensive CBSE Board Curriculum
+                    </span>
+                    <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight leading-tight mb-3">
+                      Master Your Subjects with Curated Notes & Passes
+                    </h1>
+                    <p class="text-blue-100 text-sm sm:text-base mb-6">
+                      Buy individual chapters for ₹49, get full subject packs for ₹499 with lifetime upgrades, or unlock the entire class with an all-access pass!
+                    </p>
+                    <div class="flex flex-wrap gap-3">
+                      {classPasses.map(cp => (
+                        <button
+                          key={cp.id}
+                          disabled={cp.is_owned}
+                          onClick={() => addToCart(cp)}
+                          class={`px-4 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-2 transition shadow-md ${
+                            cp.is_owned
+                              ? 'bg-emerald-500 text-white cursor-default'
+                              : 'bg-white text-blue-700 hover:bg-blue-50'
+                          }`}
+                        >
+                          <i data-lucide={cp.is_owned ? 'check' : 'zap'} class="w-4 h-4"></i>
+                          {cp.is_owned ? `${cp.title} (Owned)` : `${cp.title} - ₹${cp.price_rupees}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Hierarchy Selector: Board -> Class -> Subject */}
+                <div class="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm mb-8">
+                  <div class="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-slate-100">
+                    {/* Class Selector Tabs */}
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">Grade:</span>
+                      {selectedBoard && selectedBoard.classes && selectedBoard.classes.map(cl => (
+                        <button
+                          key={cl.id}
+                          onClick={() => { setSelectedClass(cl); if (cl.subjects && cl.subjects.length > 0) setSelectedSubject(cl.subjects[0]); }}
+                          class={`px-4 py-2 rounded-xl text-sm font-bold transition ${
+                            selectedClass && selectedClass.id === cl.id
+                              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          {cl.name}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Subject Pills */}
+                    <div class="flex items-center gap-2 overflow-x-auto custom-scrollbar">
+                      <span class="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2">Subject:</span>
+                      {selectedClass && selectedClass.subjects && selectedClass.subjects.map(sub => (
+                        <button
+                          key={sub.id}
+                          onClick={() => setSelectedSubject(sub)}
+                          class={`px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-2 ${
+                            selectedSubject && selectedSubject.id === sub.id
+                              ? 'bg-slate-900 text-white shadow-md'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          <span>{sub.name}</span>
+                          {sub.is_owned && (
+                            <span class="w-2 h-2 rounded-full bg-emerald-400" title="Subject Pack Owned"></span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Subject Pack Upgrade Promo Banner */}
+                  {subjectProduct && (
+                    <div class="mt-6 p-5 rounded-2xl bg-gradient-to-r from-indigo-50 via-blue-50 to-indigo-50 border border-blue-200/80 flex flex-col md:flex-row items-center justify-between gap-4">
+                      <div class="flex items-center gap-4">
+                        <div class="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-bold shadow-md shadow-indigo-500/20">
+                          <i data-lucide="package" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                          <div class="flex items-center gap-2">
+                            <h3 class="font-bold text-slate-900 text-base">{subjectProduct.title}</h3>
+                            {subjectProduct.is_owned && (
+                              <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800">Owned (Lifetime)</span>
+                            )}
+                          </div>
+                          <p class="text-xs text-slate-600 mt-0.5">{subjectProduct.description}</p>
+                          {subjectProduct.upgrade_credit_rupees > 0 && !subjectProduct.is_owned && (
+                            <div class="mt-1 text-xs text-amber-700 font-semibold flex items-center gap-1">
+                              <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-600"></i>
+                              Upgrade rule applied: ₹{subjectProduct.upgrade_credit_rupees} deducted for chapters you already bought!
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div class="flex items-center gap-4 self-end md:self-center">
+                        <div class="text-right">
+                          {subjectProduct.upgrade_credit_rupees > 0 && !subjectProduct.is_owned ? (
+                            <div>
+                              <span class="text-xs text-slate-400 line-through mr-1.5">₹{subjectProduct.price_rupees}</span>
+                              <span class="text-2xl font-black text-blue-600">₹{subjectProduct.effective_price_rupees}</span>
+                            </div>
+                          ) : (
+                            <div class="text-2xl font-black text-slate-900">₹{subjectProduct.price_rupees}</div>
+                          )}
+                          <div class="text-[10px] text-slate-500 font-medium">Incl. 18% GST • Lifetime</div>
+                        </div>
+
+                        {!subjectProduct.is_owned ? (
+                          <button
+                            onClick={() => addToCart(subjectProduct)}
+                            class="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md shadow-blue-500/20 transition flex items-center gap-2"
+                          >
+                            <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+                            {subjectProduct.upgrade_credit_rupees > 0 ? "Upgrade Now" : "Buy Subject Pack"}
+                          </button>
+                        ) : (
+                          <span class="px-4 py-2 rounded-xl bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center gap-1.5">
+                            <i data-lucide="check" class="w-4 h-4 text-emerald-600"></i>
+                            All Chapters Unlocked
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chapter Cards Grid */}
+                <div class="space-y-4">
+                  <div class="flex items-center justify-between">
+                    <h2 class="text-xl font-bold text-slate-900 flex items-center gap-2">
+                      <span>Curriculum Chapters ({activeChapters.length})</span>
+                      {selectedSubject && <span class="text-sm font-semibold text-slate-500">• {selectedSubject.name}</span>}
+                    </h2>
+                  </div>
+
+                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {activeChapters.map(chapter => {
+                      const chapterProd = products.find(p => p.product_type === 'CHAPTER' && p.target_chapter === chapter.id);
+                      return (
+                        <div key={chapter.id} class="bg-white rounded-2xl border border-slate-200/90 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between">
+                          <div>
+                            <div class="flex items-start justify-between gap-2 mb-3">
+                              <span class="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold">
+                                Chapter {chapter.chapter_number}
+                              </span>
+                              {chapter.is_free ? (
+                                <span class="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-extrabold flex items-center gap-1">
+                                  <i data-lucide="gift" class="w-3.5 h-3.5"></i>
+                                  Free Sample
+                                </span>
+                              ) : chapter.is_owned ? (
+                                <span class="px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800 text-xs font-extrabold flex items-center gap-1">
+                                  <i data-lucide="unlock" class="w-3.5 h-3.5"></i>
+                                  Owned
+                                </span>
+                              ) : (
+                                <span class="px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 text-xs font-extrabold flex items-center gap-1">
+                                  <i data-lucide="lock" class="w-3.5 h-3.5"></i>
+                                  Locked
+                                </span>
+                              )}
+                            </div>
+
+                            <h3 class="font-bold text-slate-900 text-base leading-snug mb-2">{chapter.title}</h3>
+                            <p class="text-xs text-slate-500 leading-relaxed line-clamp-3 mb-4">{chapter.description}</p>
+                          </div>
+
+                          <div class="pt-4 border-t border-slate-100 flex items-center justify-between">
+                            {chapter.is_free || chapter.is_owned ? (
+                              <button
+                                onClick={() => openReader(chapter.id, chapter.title)}
+                                class="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition shadow-sm"
+                              >
+                                <i data-lucide="book-open" class="w-4 h-4"></i>
+                                Read Study Material
+                              </button>
+                            ) : (
+                              <div class="w-full flex items-center justify-between gap-3">
+                                <div>
+                                  <div class="text-lg font-black text-slate-900">₹49</div>
+                                  <div class="text-[10px] text-slate-500">Lifetime • Incl. GST</div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                  <button
+                                    onClick={() => openReader(chapter.id, chapter.title)}
+                                    class="p-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
+                                    title="Try Read (Will show 403 access lock if unpurchased)"
+                                  >
+                                    <i data-lucide="eye" class="w-4 h-4"></i>
+                                  </button>
+                                  <button
+                                    onClick={() => chapterProd && addToCart(chapterProd)}
+                                    class="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm shadow-blue-500/20"
+                                  >
+                                    <i data-lucide="shopping-cart" class="w-3.5 h-3.5"></i>
+                                    Add ₹49
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MY LIBRARY VIEW (S6) */}
+            {currentView === 'library' && (
+              <div class="space-y-8">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h1 class="text-2xl font-extrabold text-slate-900">My Study Library</h1>
+                    <p class="text-sm text-slate-500 mt-1">Access all your purchased chapters, subject packs, and active class passes.</p>
+                  </div>
+                  <button onClick={() => setCurrentView('catalogue')} class="px-4 py-2 rounded-xl border border-slate-200 hover:bg-slate-100 text-xs font-bold transition">
+                    Browse More Material
+                  </button>
+                </div>
+
+                {/* Active Passes Section with Expiry Countdown */}
+                {libraryData.class_passes.length > 0 && (
+                  <div class="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl">
+                    <h2 class="text-lg font-bold flex items-center gap-2 mb-4">
+                      <i data-lucide="zap" class="w-5 h-5 text-amber-400"></i>
+                      Active Class Passes
+                    </h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {libraryData.class_passes.map(cp => (
+                        <div key={cp.id} class="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/10 flex items-center justify-between">
+                          <div>
+                            <span class="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-1">Full Class Access</span>
+                            <h3 class="font-extrabold text-lg text-white">{cp.title}</h3>
+                            <div class="text-xs text-blue-200 mt-1 flex items-center gap-1.5">
+                              <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+                              Status: <span class="font-bold text-white">{cp.time_remaining_days}</span>
+                            </div>
+                          </div>
+                          <span class="px-3 py-1.5 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30">
+                            Active
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Subject Packs Owned */}
+                <div>
+                  <h2 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                    <i data-lucide="package" class="w-5 h-5 text-indigo-600"></i>
+                    Unlocked Subject Packs (Lifetime Access)
+                  </h2>
+                  {libraryData.subjects.length === 0 ? (
+                    <div class="bg-white rounded-2xl p-8 border border-slate-200 text-center text-slate-500 text-sm">
+                      No complete subject packs purchased yet.
+                    </div>
+                  ) : (
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+                      {libraryData.subjects.map(subEnt => (
+                        <div key={subEnt.id} class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
+                          <div>
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 uppercase">Subject Pack</span>
+                            <h3 class="font-bold text-slate-900 text-base mt-2">{subEnt.title}</h3>
+                            <p class="text-xs text-slate-500 mt-1">{subEnt.details.chapters_count || 5} Chapters Included</p>
+                          </div>
+                          <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+                            <span class="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                              <i data-lucide="check" class="w-3.5 h-3.5"></i> Lifetime
+                            </span>
+                            <button
+                              onClick={() => { setSelectedSubject(null); setCurrentView('catalogue'); }}
+                              class="text-xs font-bold text-blue-600 hover:underline"
+                            >
+                              View Chapters →
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Individual Chapters Owned */}
+                <div>
+                  <h2 class="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+                    <i data-lucide="file-text" class="w-5 h-5 text-blue-600"></i>
+                    Purchased Chapters & Free Samples
+                  </h2>
+                  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {libraryData.chapters.map(chEnt => (
+                      <div key={chEnt.id} class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <span class="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-[11px] font-bold">
+                            {chEnt.details.subject} • Ch {chEnt.details.chapter_number}
+                          </span>
+                          <h3 class="font-bold text-slate-900 text-base mt-2.5">{chEnt.details.title}</h3>
+                        </div>
+                        <div class="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
+                          <span class="text-xs text-slate-500">{chEnt.time_remaining_days}</span>
+                          <button
+                            onClick={() => openReader(chEnt.details.chapter_id, chEnt.details.title)}
+                            class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition"
+                          >
+                            <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+                            Open Notes
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {libraryData.free_sample_chapters.map(freeCh => (
+                      <div key={freeCh.id} class="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <span class="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[11px] font-bold">
+                            Free Sample Chapter
+                          </span>
+                          <h3 class="font-bold text-slate-900 text-base mt-2.5">{freeCh.title}</h3>
+                        </div>
+                        <div class="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
+                          <span class="text-xs text-emerald-600 font-bold">Included Free</span>
+                          <button
+                            onClick={() => openReader(freeCh.id, freeCh.title)}
+                            class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 transition"
+                          >
+                            <i data-lucide="book-open" class="w-3.5 h-3.5"></i>
+                            Read Free
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ORDER HISTORY & INVOICES VIEW (S8) */}
+            {currentView === 'orders' && (
+              <div class="space-y-6">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h1 class="text-2xl font-extrabold text-slate-900">Order History & Invoices</h1>
+                    <p class="text-sm text-slate-500 mt-1">Download official GST tax invoices for your accounting and records.</p>
+                  </div>
+                </div>
+
+                {orders.length === 0 ? (
+                  <div class="bg-white rounded-2xl p-12 text-center border border-slate-200 text-slate-500">
+                    <i data-lucide="receipt" class="w-12 h-12 mx-auto text-slate-300 mb-3"></i>
+                    <p class="font-semibold text-base">No orders placed yet.</p>
+                    <p class="text-xs text-slate-400 mt-1">Browse our study materials and purchase chapters or passes to view invoices.</p>
+                  </div>
+                ) : (
+                  <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left text-sm text-slate-600">
+                        <thead class="bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider border-b border-slate-200">
+                          <tr>
+                            <th class="py-3.5 px-6">Order ID</th>
+                            <th class="py-3.5 px-6">Date</th>
+                            <th class="py-3.5 px-6">Items Purchased</th>
+                            <th class="py-3.5 px-6">Status</th>
+                            <th class="py-3.5 px-6 text-right">Net Paid (Incl. GST)</th>
+                            <th class="py-3.5 px-6 text-center">Tax Invoice</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 font-medium">
+                          {orders.map(order => (
+                            <tr key={order.id} class="hover:bg-slate-50/80 transition">
+                              <td class="py-4 px-6 font-bold text-slate-900">{order.order_number}</td>
+                              <td class="py-4 px-6 text-xs text-slate-500">{new Date(order.created_at).toLocaleDateString()}</td>
+                              <td class="py-4 px-6">
+                                <div class="max-w-xs truncate text-xs font-semibold text-slate-800">
+                                  {order.items.map(i => i.product_title).join(', ')}
+                                </div>
+                              </td>
+                              <td class="py-4 px-6">
+                                <span class={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                                  order.status === 'PAID' ? 'bg-emerald-100 text-emerald-800' :
+                                  order.status === 'PENDING_UPI' ? 'bg-amber-100 text-amber-800' :
+                                  'bg-rose-100 text-rose-800'
+                                }`}>
+                                  {order.status}
+                                </span>
+                              </td>
+                              <td class="py-4 px-6 text-right font-black text-slate-900">
+                                ₹{order.net_amount_rupees.toFixed(2)}
+                              </td>
+                              <td class="py-4 px-6 text-center">
+                                <a
+                                  href={`/api/orders/${order.id}/invoice/?format=html`}
+                                  target="_blank"
+                                  class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
+                                >
+                                  <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+                                  Invoice
+                                </a>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ADMIN PORTAL VIEW (A1 - A7) */}
+            {currentView === 'admin' && user && user.is_admin && (
+              <div class="space-y-6">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <h1 class="text-2xl font-black text-slate-900">Admin Control Center</h1>
+                    <p class="text-sm text-slate-500 mt-1">Manage catalogue, set pricing, review payments, configure coupons, and inspect audit logs.</p>
+                  </div>
+                </div>
+
+                {/* Admin Subtabs */}
+                <div class="flex items-center gap-2 border-b border-slate-200 pb-3 overflow-x-auto custom-scrollbar">
+                  {[
+                    { id: 'dashboard', label: 'Dashboard & Metrics (A7)', icon: 'layout-dashboard' },
+                    { id: 'orders', label: 'All Orders & Payments (A4)', icon: 'receipt' },
+                    { id: 'coupons', label: 'Coupons (A5)', icon: 'tag' },
+                    { id: 'access', label: 'Manual Access Audit (A6)', icon: 'shield-check' },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setAdminTab(tab.id)}
+                      class={`px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${
+                        adminTab === tab.id
+                          ? 'bg-purple-600 text-white shadow-md shadow-purple-500/20'
+                          : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      <i data-lucide={tab.icon} class="w-4 h-4"></i>
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Dashboard Tab (A7) */}
+                {adminTab === 'dashboard' && adminDashboard && (
+                  <div class="space-y-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <span class="text-xs font-bold text-slate-400 uppercase">Total Net Revenue</span>
+                        <div class="text-3xl font-black text-slate-900 mt-2">₹{adminDashboard.metrics.total_revenue_rupees.toFixed(2)}</div>
+                        <span class="text-[11px] text-emerald-600 font-semibold mt-1 block">From confirmed orders</span>
+                      </div>
+                      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <span class="text-xs font-bold text-slate-400 uppercase">Paid Orders</span>
+                        <div class="text-3xl font-black text-slate-900 mt-2">{adminDashboard.metrics.total_orders}</div>
+                        <span class="text-[11px] text-slate-500 font-semibold mt-1 block">Successfully captured</span>
+                      </div>
+                      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <span class="text-xs font-bold text-slate-400 uppercase">Active Class Passes</span>
+                        <div class="text-3xl font-black text-purple-600 mt-2">{adminDashboard.metrics.active_passes}</div>
+                        <span class="text-[11px] text-slate-500 font-semibold mt-1 block">Unexpired student passes</span>
+                      </div>
+                      <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                        <span class="text-xs font-bold text-slate-400 uppercase">Registered Students</span>
+                        <div class="text-3xl font-black text-slate-900 mt-2">{adminDashboard.metrics.total_students}</div>
+                        <span class="text-[11px] text-slate-500 font-semibold mt-1 block">Active user accounts</span>
+                      </div>
+                    </div>
+
+                    {/* Top Products */}
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <h3 class="text-base font-bold text-slate-900 mb-4">Top Performing Products</h3>
+                      <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                          <thead class="bg-slate-50 text-xs font-bold text-slate-400 uppercase border-b border-slate-100">
+                            <tr>
+                              <th class="py-3 px-4">Product Title</th>
+                              <th class="py-3 px-4">Type</th>
+                              <th class="py-3 px-4 text-center">Units Sold</th>
+                              <th class="py-3 px-4 text-right">Total Revenue</th>
+                            </tr>
+                          </thead>
+                          <tbody class="divide-y divide-slate-100">
+                            {adminDashboard.top_products.map((p, idx) => (
+                              <tr key={idx}>
+                                <td class="py-3 px-4 font-bold text-slate-900">{p.title}</td>
+                                <td class="py-3 px-4 text-xs text-slate-500">{p.type}</td>
+                                <td class="py-3 px-4 text-center font-bold text-slate-700">{p.units_sold}</td>
+                                <td class="py-3 px-4 text-right font-black text-slate-900">₹{p.revenue_rupees.toFixed(2)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Orders Tab (A4) */}
+                {adminTab === 'orders' && (
+                  <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div class="p-4 border-b border-slate-200 flex items-center justify-between">
+                      <h3 class="font-bold text-slate-900">All System Orders & Payments</h3>
+                      <span class="text-xs text-slate-500">{adminOrders.length} records</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                      <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-50 text-xs font-bold text-slate-400 uppercase border-b border-slate-200">
+                          <tr>
+                            <th class="py-3 px-4">Order #</th>
+                            <th class="py-3 px-4">Student</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4">Base (₹)</th>
+                            <th class="py-3 px-4">GST (18%)</th>
+                            <th class="py-3 px-4 text-right">Net (₹)</th>
+                            <th class="py-3 px-4 text-center">Invoice</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">
+                          {adminOrders.map(o => (
+                            <tr key={o.id}>
+                              <td class="py-3 px-4 font-bold text-slate-900">{o.order_number}</td>
+                              <td class="py-3 px-4">
+                                <div class="font-semibold text-slate-900">{o.user_name}</div>
+                                <div class="text-[11px] text-slate-400">{o.user_email}</div>
+                              </td>
+                              <td class="py-3 px-4">
+                                <span class={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                                  o.status === 'PAID' ? 'bg-emerald-100 text-emerald-800' :
+                                  o.status === 'PENDING_UPI' ? 'bg-amber-100 text-amber-800' :
+                                  'bg-rose-100 text-rose-800'
+                                }`}>
+                                  {o.status}
+                                </span>
+                              </td>
+                              <td class="py-3 px-4">₹{o.base_amount_rupees.toFixed(2)}</td>
+                              <td class="py-3 px-4">₹{o.gst_amount_rupees.toFixed(2)}</td>
+                              <td class="py-3 px-4 text-right font-black text-slate-900">₹{o.net_amount_rupees.toFixed(2)}</td>
+                              <td class="py-3 px-4 text-center">
+                                <a href={`/api/orders/${o.id}/invoice/?format=html`} target="_blank" class="text-xs text-blue-600 font-bold hover:underline">
+                                  View
+                                </a>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Coupons Tab (A5) */}
+                {adminTab === 'coupons' && (
+                  <div class="space-y-6">
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <h3 class="font-bold text-slate-900 mb-4">Active & Configured Coupons</h3>
+                      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {adminCoupons.map(c => (
+                          <div key={c.id} class="p-4 rounded-xl border border-slate-200 flex items-center justify-between">
+                            <div>
+                              <span class="px-2.5 py-1 rounded-md bg-purple-100 text-purple-800 font-extrabold text-sm tracking-wider">
+                                {c.code}
+                              </span>
+                              <div class="text-xs text-slate-600 mt-2 font-medium">
+                                {c.discount_type === 'PERCENTAGE' ? `${c.discount_value}% Discount` : `Flat ₹${c.discount_value / 100} Discount`}
+                              </div>
+                              <div class="text-[11px] text-slate-400 mt-0.5">Used: {c.times_used} / {c.usage_limit} times</div>
+                            </div>
+                            <button
+                              onClick={async () => {
+                                await apiFetch(`/admin/coupons/${c.id}/`, {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({ is_active: !c.is_active })
+                                });
+                                loadAdminData();
+                                showToast(`Coupon ${c.code} updated`);
+                              }}
+                              class={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                                c.is_active ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                              }`}
+                            >
+                              {c.is_active ? 'Active (Click to Disable)' : 'Disabled (Click to Enable)'}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Manual Access Control & Audit Log (A6) */}
+                {adminTab === 'access' && (
+                  <div class="space-y-6">
+                    {/* Grant / Revoke Form */}
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                      <h3 class="font-bold text-slate-900 mb-3">Manual Access Control (Logged Action)</h3>
+                      <p class="text-xs text-slate-500 mb-4">Grant or revoke student access by hand. Every action must include a reason and is saved to the audit log.</p>
+                      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        <div>
+                          <label class="block text-xs font-bold text-slate-600 mb-1">Student ID / Target</label>
+                          <input
+                            type="number"
+                            placeholder="Student ID (e.g. 2)"
+                            value={manualAccessForm.student_id}
+                            onChange={(e) => setManualAccessForm({ ...manualAccessForm, student_id: e.target.value })}
+                            class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                          />
+                        </div>
+                        <div>
+                          <label class="block text-xs font-bold text-slate-600 mb-1">Action</label>
+                          <select
+                            value={manualAccessForm.action}
+                            onChange={(e) => setManualAccessForm({ ...manualAccessForm, action: e.target.value })}
+                            class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                          >
+                            <option value="GRANT">GRANT ACCESS</option>
+                            <option value="REVOKE">REVOKE ACCESS</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label class="block text-xs font-bold text-slate-600 mb-1">Entitlement Type</label>
+                          <select
+                            value={manualAccessForm.entitlement_type}
+                            onChange={(e) => setManualAccessForm({ ...manualAccessForm, entitlement_type: e.target.value })}
+                            class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                          >
+                            <option value="CHAPTER">Chapter</option>
+                            <option value="SUBJECT">Subject Pack</option>
+                            <option value="CLASS_PASS">Class Pass</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label class="block text-xs font-bold text-slate-600 mb-1">Target Object ID</label>
+                          <input
+                            type="number"
+                            placeholder="ID of Chapter, Subject, or Class"
+                            value={manualAccessForm.target_id}
+                            onChange={(e) => setManualAccessForm({ ...manualAccessForm, target_id: e.target.value })}
+                            class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                          />
+                        </div>
+                        <div class="sm:col-span-2">
+                          <label class="block text-xs font-bold text-slate-600 mb-1">Audit Reason (Required)</label>
+                          <input
+                            type="text"
+                            placeholder="Reason for manual adjustment (e.g. Scholarship reward, payment dispute resolution)"
+                            value={manualAccessForm.reason}
+                            onChange={(e) => setManualAccessForm({ ...manualAccessForm, reason: e.target.value })}
+                            class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm"
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!manualAccessForm.student_id || !manualAccessForm.target_id || !manualAccessForm.reason) {
+                            showToast("Please fill in Student ID, Target ID, and Reason", "error");
+                            return;
+                          }
+                          try {
+                            const res = await apiFetch('/admin/access/manage/', {
+                              method: 'POST',
+                              body: JSON.stringify(manualAccessForm)
+                            });
+                            showToast(res.message);
+                            loadAdminData();
+                            setManualAccessForm({ ...manualAccessForm, reason: '' });
+                          } catch (err) {
+                            showToast(err.message, "error");
+                          }
+                        }}
+                        class="mt-4 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs uppercase tracking-wider transition"
+                      >
+                        Execute & Log Action
+                      </button>
+                    </div>
+
+                    {/* Audit Logs Table */}
+                    <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                      <div class="p-4 border-b border-slate-200">
+                        <h3 class="font-bold text-slate-900">Audit Trail: Manual Access Adjustments</h3>
+                      </div>
+                      <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                          <thead class="bg-slate-50 text-xs font-bold text-slate-400 uppercase border-b border-slate-200">
+                            <tr>
+                              <th class="py-3 px-4">Admin</th>
+                              <th class="py-3 px-4">Student</th>
+                              <th class="py-3 px-4">Action</th>
+                              <th class="py-3 px-4">Target</th>
+                              <th class="py-3 px-4">Reason</th>
+                              <th class="py-3 px-4">Timestamp</th>
+                            </tr>
+                          </thead>
+                          <tbody class="divide-y divide-slate-100">
+                            {adminLogs.map(log => (
+                              <tr key={log.id}>
+                                <td class="py-3 px-4 font-bold text-slate-900">{log.admin_username}</td>
+                                <td class="py-3 px-4">{log.student_username}</td>
+                                <td class="py-3 px-4">
+                                  <span class={`px-2 py-0.5 rounded text-xs font-bold ${
+                                    log.action === 'GRANT' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                                  }`}>
+                                    {log.action}
+                                  </span>
+                                </td>
+                                <td class="py-3 px-4 font-medium text-slate-800">{log.target}</td>
+                                <td class="py-3 px-4 text-xs text-slate-600">{log.reason}</td>
+                                <td class="py-3 px-4 text-xs text-slate-400">{log.created_at}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </main>
+
+          {/* CART & CHECKOUT DRAWER (S4) */}
+          {cartDrawerOpen && (
+            <div class="fixed inset-0 z-50 overflow-hidden">
+              <div onClick={() => setCartDrawerOpen(false)} class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity"></div>
+              <div class="fixed inset-y-0 right-0 max-w-full flex pl-10">
+                <div class="w-screen max-w-md bg-white shadow-2xl flex flex-col justify-between">
+                  <div class="p-6 border-b border-slate-200 flex items-center justify-between">
+                    <h2 class="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                      <i data-lucide="shopping-bag" class="w-5 h-5 text-blue-600"></i>
+                      Shopping Cart ({cart.length})
+                    </h2>
+                    <button onClick={() => setCartDrawerOpen(false)} class="p-2 text-slate-400 hover:text-slate-600">✕</button>
+                  </div>
+
+                  {/* Cart Items List */}
+                  <div class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+                    {cart.length === 0 ? (
+                      <div class="text-center py-12 text-slate-400 text-sm">
+                        <i data-lucide="shopping-cart" class="w-12 h-12 mx-auto text-slate-300 mb-2"></i>
+                        Your cart is empty.
+                      </div>
+                    ) : (
+                      cart.map(item => (
+                        <div key={item.id} class="p-4 rounded-xl border border-slate-200 flex items-center justify-between gap-3">
+                          <div>
+                            <span class="text-[10px] font-bold text-blue-600 uppercase tracking-wider">{item.product_type}</span>
+                            <h4 class="font-bold text-slate-900 text-sm">{item.title}</h4>
+                            <div class="text-xs text-slate-500 mt-1">₹{item.price_rupees}</div>
+                          </div>
+                          <button onClick={() => removeFromCart(item.id)} class="text-rose-500 hover:text-rose-700 p-2 text-xs font-bold">
+                            Remove
+                          </button>
+                        </div>
+                      ))
+                    )}
+
+                    {/* Coupon Input */}
+                    {cart.length > 0 && (
+                      <div class="pt-4 border-t border-slate-200">
+                        <label class="block text-xs font-bold text-slate-700 mb-1.5">Apply Coupon (e.g. WELCOME10, FLAT50)</label>
+                        <div class="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Enter coupon code"
+                            value={couponCode}
+                            onChange={(e) => setCouponCode(e.target.value.toUpperCase())}
+                            class="flex-1 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        {cartCalculation && cartCalculation.coupon_code && (
+                          <div class="text-xs text-emerald-600 font-bold mt-1.5 flex items-center gap-1">
+                            <i data-lucide="tag" class="w-3.5 h-3.5"></i>
+                            Coupon '{cartCalculation.coupon_code}' applied: -₹{cartCalculation.coupon_discount_rupees.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 18% Inclusive GST Breakdown (Rule 5 & S4) */}
+                    {cartCalculation && (
+                      <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2 text-xs text-slate-600">
+                        <div class="flex justify-between">
+                          <span>Gross Value:</span>
+                          <span class="font-semibold text-slate-900">₹{cartCalculation.gross_amount_rupees.toFixed(2)}</span>
+                        </div>
+                        {cartCalculation.upgrade_credit_rupees > 0 && (
+                          <div class="flex justify-between text-amber-700 font-semibold">
+                            <span>Upgrade Credit:</span>
+                            <span>-₹{cartCalculation.upgrade_credit_rupees.toFixed(2)}</span>
+                          </div>
+                        )}
+                        {cartCalculation.coupon_discount_rupees > 0 && (
+                          <div class="flex justify-between text-emerald-700 font-semibold">
+                            <span>Coupon Discount:</span>
+                            <span>-₹{cartCalculation.coupon_discount_rupees.toFixed(2)}</span>
+                          </div>
+                        )}
+                        <div class="pt-2 border-t border-slate-200 flex justify-between font-bold text-slate-800">
+                          <span>Taxable Base Value:</span>
+                          <span>₹{cartCalculation.base_amount_rupees.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-slate-500">
+                          <span>CGST (9%):</span>
+                          <span>₹{cartCalculation.cgst_amount_rupees.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-slate-500">
+                          <span>SGST (9%):</span>
+                          <span>₹{cartCalculation.sgst_amount_rupees.toFixed(2)}</span>
+                        </div>
+                        <div class="pt-2 border-t border-slate-200 flex justify-between text-base font-black text-slate-900">
+                          <span>Total Payable (Incl. 18% GST):</span>
+                          <span class="text-blue-600">₹{cartCalculation.net_amount_rupees.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Checkout Button */}
+                  <div class="p-6 border-t border-slate-200 bg-white">
+                    <button
+                      disabled={cart.length === 0 || cartLoading}
+                      onClick={handleCheckout}
+                      class="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition disabled:opacity-50"
+                    >
+                      <i data-lucide="lock" class="w-4 h-4"></i>
+                      {cartLoading ? "Calculating..." : "Proceed to Checkout"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* RAZORPAY PAYMENT SIMULATION MODAL (S5) */}
+          {paymentModal.open && paymentModal.order && (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <div class="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-slate-100">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
+                      <i data-lucide="credit-card" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                      <h3 class="font-extrabold text-lg text-slate-900">Razorpay Payment Gateway</h3>
+                      <p class="text-xs text-slate-500">Order #{paymentModal.order.order_number}</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setPaymentModal({ ...paymentModal, open: false })} class="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+
+                <div class="py-6 space-y-4">
+                  <div class="p-4 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-between">
+                    <div>
+                      <span class="text-xs font-semibold text-slate-500 block">Total Payable Amount:</span>
+                      <span class="text-2xl font-black text-blue-700">₹{paymentModal.order.net_amount_rupees.toFixed(2)}</span>
+                    </div>
+                    <span class="px-3 py-1 rounded-full bg-blue-200 text-blue-900 text-xs font-bold">Test Mode</span>
+                  </div>
+
+                  {/* Official Razorpay Checkout Modal Button */}
+                  <button
+                    onClick={openOfficialRazorpayCheckout}
+                    class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-md transition"
+                  >
+                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                    Launch Razorpay Checkout Modal
+                  </button>
+
+                  <div class="relative flex py-2 items-center">
+                    <div class="flex-grow border-t border-slate-200"></div>
+                    <span class="flex-shrink mx-4 text-xs font-bold text-slate-400 uppercase">Or Interactive Test Simulator</span>
+                    <div class="flex-grow border-t border-slate-200"></div>
+                  </div>
+
+                  {/* Test Simulator Buttons as specified in assessment document */}
+                  <div class="space-y-2">
+                    <button
+                      onClick={() => handleSimulatePayment('SUCCESS', 'success@razorpay')}
+                      class="w-full py-2.5 px-4 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs flex items-center justify-between transition"
+                    >
+                      <span class="flex items-center gap-2">
+                        <i data-lucide="check-circle" class="w-4 h-4 text-emerald-600"></i>
+                        Simulate UPI Success (success@razorpay)
+                      </span>
+                      <span class="text-[11px] font-mono bg-emerald-200/60 px-2 py-0.5 rounded">Captures & Grants Access</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleSimulatePayment('FAILURE', 'failure@razorpay')}
+                      class="w-full py-2.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 font-bold text-xs flex items-center justify-between transition"
+                    >
+                      <span class="flex items-center gap-2">
+                        <i data-lucide="x-circle" class="w-4 h-4 text-rose-600"></i>
+                        Simulate UPI Failure (failure@razorpay)
+                      </span>
+                      <span class="text-[11px] font-mono bg-rose-200/60 px-2 py-0.5 rounded">Fails & Allows Retry</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleSimulatePayment('PENDING', 'pending@razorpay')}
+                      class="w-full py-2.5 px-4 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 font-bold text-xs flex items-center justify-between transition"
+                    >
+                      <span class="flex items-center gap-2">
+                        <i data-lucide="clock" class="w-4 h-4 text-amber-600"></i>
+                        Simulate UPI Pending Collect Request
+                      </span>
+                      <span class="text-[11px] font-mono bg-amber-200/60 px-2 py-0.5 rounded">Waiting for Settle</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SECURE STUDY MATERIAL READER MODAL (S7) */}
+          {readerModal.open && (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md">
+              <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+                <div class="p-5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+                  <div class="flex items-center gap-3">
+                    <div class="w-9 h-9 rounded-xl bg-slate-900 text-white flex items-center justify-center">
+                      <i data-lucide="book-open" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                      <h3 class="font-extrabold text-base text-slate-900">{readerModal.chapterTitle}</h3>
+                      <p class="text-xs text-slate-500">Official Curriculum Notes & Formula Sheet</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setReaderModal({ ...readerModal, open: false })} class="text-slate-400 hover:text-slate-600 p-2">✕</button>
+                </div>
+
+                <div class="p-6 flex-1 overflow-y-auto custom-scrollbar">
+                  {readerModal.loading ? (
+                    <div class="text-center py-12 text-slate-400">Loading secure notes...</div>
+                  ) : readerModal.error ? (
+                    <div class="p-6 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-center space-y-3">
+                      <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                        <i data-lucide="shield-alert" class="w-6 h-6"></i>
+                      </div>
+                      <h4 class="font-extrabold text-base">Server Access Refusal (HTTP 403 Forbidden)</h4>
+                      <p class="text-xs leading-relaxed max-w-md mx-auto">{readerModal.error}</p>
+                      <div class="pt-2">
+                        <button
+                          onClick={() => { setReaderModal({ ...readerModal, open: false }); setCartDrawerOpen(true); }}
+                          class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition"
+                        >
+                          Unlock by Purchasing Chapter / Subject Pack
+                        </button>
+                      </div>
+                    </div>
+                  ) : readerModal.material && (
+                    <div class="prose prose-slate max-w-none text-sm leading-relaxed">
+                      <div class="mb-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                        <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600"></i>
+                        Server Verified: {readerModal.material.access_granted_reason}
+                      </div>
+                      <div dangerouslySetInnerHTML={{ __html: readerModal.material.content_html }}></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* AUTHENTICATION MODAL (S1) */}
+          {authModalOpen && (
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+              <div class="bg-white rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-2xl border border-slate-100">
+                <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+                  <h3 class="font-extrabold text-lg text-slate-900">
+                    {authMode === 'login' ? 'Sign In' : authMode === 'register' ? 'Create Student Account' : 'Sign In via Mobile OTP'}
+                  </h3>
+                  <button onClick={() => setAuthModalOpen(false)} class="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+
+                {authError && (
+                  <div class="mt-4 p-3 rounded-xl bg-rose-50 text-rose-700 text-xs font-semibold">{authError}</div>
+                )}
+
+                <div class="py-5 space-y-4">
+                  {authMode !== 'otp' ? (
+                    <>
+                      <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Username or Email</label>
+                        <input
+                          type="text"
+                          value={authForm.username}
+                          onChange={(e) => setAuthForm({ ...authForm, username: e.target.value })}
+                          class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      {authMode === 'register' && (
+                        <div>
+                          <label class="block text-xs font-bold text-slate-700 mb-1">Email</label>
+                          <input
+                            type="email"
+                            value={authForm.email}
+                            onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })}
+                            class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Password</label>
+                        <input
+                          type="password"
+                          value={authForm.password}
+                          onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })}
+                          class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setAuthError('');
+                          try {
+                            const endpoint = authMode === 'login' ? '/auth/login/' : '/auth/register/';
+                            const payload = authMode === 'login'
+                              ? { username_or_email: authForm.username, password: authForm.password }
+                              : { username: authForm.username, email: authForm.email, password: authForm.password, role: 'STUDENT' };
+                            const res = await apiFetch(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+                            localStorage.setItem('edtech_token', res.token);
+                            setToken(res.token);
+                            setUser(res.user);
+                            setAuthModalOpen(false);
+                            showToast("Welcome back!");
+                          } catch (err) {
+                            setAuthError(err.message);
+                          }
+                        }}
+                        class="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md transition"
+                      >
+                        {authMode === 'login' ? 'Sign In' : 'Sign Up'}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">Mobile Phone Number</label>
+                        <input
+                          type="text"
+                          placeholder="9876543210"
+                          value={authForm.phone_number}
+                          onChange={(e) => setAuthForm({ ...authForm, phone_number: e.target.value })}
+                          class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label class="block text-xs font-bold text-slate-700 mb-1">OTP Code (Use '123456' for Mock SMS)</label>
+                        <input
+                          type="text"
+                          placeholder="123456"
+                          value={authForm.otp_code}
+                          onChange={(e) => setAuthForm({ ...authForm, otp_code: e.target.value })}
+                          class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                      </div>
+                      <button
+                        onClick={async () => {
+                          setAuthError('');
+                          try {
+                            const res = await apiFetch('/auth/otp-mock/', {
+                              method: 'POST',
+                              body: JSON.stringify({ phone_number: authForm.phone_number, otp_code: authForm.otp_code })
+                            });
+                            if (res.token) {
+                              localStorage.setItem('edtech_token', res.token);
+                              setToken(res.token);
+                              setUser(res.user);
+                              setAuthModalOpen(false);
+                              showToast("Logged in via OTP!");
+                            } else {
+                              showToast(res.message, "info");
+                            }
+                          } catch (err) {
+                            setAuthError(err.message);
+                          }
+                        }}
+                        class="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md transition"
+                      >
+                        Verify OTP & Log In
+                      </button>
+                    </>
+                  )}
+
+                  <div class="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                    {authMode === 'login' ? (
+                      <>
+                        <button onClick={() => setAuthMode('register')} class="text-blue-600 hover:underline">Create an account</button>
+                        <button onClick={() => setAuthMode('otp')} class="text-slate-600 hover:underline">Use Mobile OTP</button>
+                      </>
+                    ) : (
+                      <button onClick={() => setAuthMode('login')} class="text-blue-600 hover:underline">Already have an account? Sign in</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Footer */}
+          <footer class="bg-white border-t border-slate-200 py-6 text-center text-xs text-slate-500 mt-auto">
+            <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <div>© 2026 EdTech Academy Pvt Ltd • GSTIN: 07AAAAA0000A1Z5 • Commercial Education & Coaching</div>
+              <div class="flex items-center gap-4">
+                <span>Razorpay Test Mode Verified</span>
+                <span>•</span>
+                <span>18% Inclusive GST Compliant</span>
+              </div>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
